@@ -19,15 +19,19 @@ from state import FEATURE_NAMES
 router = APIRouter(prefix="/monitor", tags=["Monitoring"])
 
 # ── Reference distributions (5000-row training sample) ────────────
-_ref_df: pd.DataFrame = (
-    pd.read_csv("data/creditcard.csv")
-      .drop(columns=["Class"])
-      .sample(n=5000, random_state=42)
-      [FEATURE_NAMES]
-)
-_ref_arrays: Dict[str, np.ndarray] = {
-    col: _ref_df[col].values for col in FEATURE_NAMES
-}
+# Optional: only available when data/creditcard.csv is present (not in CI).
+_ref_arrays: Dict[str, np.ndarray] = {}
+try:
+    _ref_df = (
+        pd.read_csv("data/creditcard.csv")
+          .drop(columns=["Class"])
+          .sample(n=5000, random_state=42)
+          [FEATURE_NAMES]
+    )
+    _ref_arrays = {col: _ref_df[col].values for col in FEATURE_NAMES}
+    print("Monitor: reference distribution loaded.")
+except FileNotFoundError:
+    print("Monitor: data/creditcard.csv not found — drift detection disabled.")
 
 # ── Live prediction store ──────────────────────────────────────────
 _lock = threading.Lock()
@@ -70,6 +74,12 @@ def monitor_stats(min_samples: int = 100):
         n_live     = len(_predictions)
         req_count  = _request_count
         fraud_rate = _fraud_count / max(req_count, 1)
+        if not _ref_arrays:
+            return {
+                "status":        "no_reference_data",
+                "message":       "Drift detection requires data/creditcard.csv at startup.",
+                "request_count": req_count,
+            }
         if n_live < min_samples:
             return {
                 "status":        "insufficient_data",
