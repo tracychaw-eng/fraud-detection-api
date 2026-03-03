@@ -1,0 +1,9 @@
+venv/
+__pycache__/
+*.pyc
+.env
+wandb/
+*.png
+fraud_model.joblib
+threshold.joblib
+data/
