@@ -1,31 +1,24 @@
-import joblib
-import shap
 import numpy as np
 import pandas as pd
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
-from typing import List, Dict
+from typing import List
 import uvicorn
 
-# ── Load model and threshold at startup — NOT per request ─────────
-print("Loading model...")
-model     = joblib.load("fraud_model.joblib")
-THRESHOLD = joblib.load("threshold.joblib")
-explainer = shap.TreeExplainer(model)
-print(f"Model loaded. Threshold: {THRESHOLD:.3f}")
+from state import model, THRESHOLD, explainer, FEATURE_NAMES
+from routers.monitor import record_prediction
+from routers import shap_plots, monitor, ab_testing
 
+# ── App ───────────────────────────────────────────────────────────
 app = FastAPI(
     title="Fraud Detection API",
     description="Real-time credit card fraud detection with SHAP explainability",
-    version="1.0.0"
+    version="2.0.0"
 )
 
-# ── Feature names — must match training data exactly ──────────────
-FEATURE_NAMES = (
-    ["Time"] +
-    [f"V{i}" for i in range(1, 29)] +
-    ["Amount"]
-)
+app.include_router(shap_plots.router)
+app.include_router(monitor.router)
+app.include_router(ab_testing.router)
 
 # ── Request / Response schemas ────────────────────────────────────
 class Transaction(BaseModel):
@@ -80,27 +73,22 @@ def predict_single(transaction: Transaction):
     input_dict = transaction.model_dump()
     input_df   = pd.DataFrame([input_dict])[FEATURE_NAMES]
 
-    # Prediction
     proba      = float(model.predict_proba(input_df)[0, 1])
     prediction = int(proba >= THRESHOLD)
     label      = "fraud" if prediction == 1 else "legitimate"
 
-    # SHAP values — explains WHY this prediction was made
+    record_prediction(input_dict, proba)  # feed monitoring ring buffer
+
     shap_values = explainer.shap_values(input_df)
     shap_dict   = dict(zip(FEATURE_NAMES, shap_values[0]))
-
-    # Return top 5 most influential features (by absolute SHAP value)
-    top_shap = dict(
-        sorted(shap_dict.items(), key=lambda x: abs(x[1]), reverse=True)[:5]
-    )
-    # Round for readability
-    top_shap = {k: round(float(v), 4) for k, v in top_shap.items()}
+    top_shap    = dict(sorted(shap_dict.items(), key=lambda x: abs(x[1]), reverse=True)[:5])
+    top_shap    = {k: round(float(v), 4) for k, v in top_shap.items()}
 
     return {
-        "prediction":       prediction,
-        "label":            label,
+        "prediction":        prediction,
+        "label":             label,
         "fraud_probability": round(proba, 4),
-        "threshold_used":   round(THRESHOLD, 4),
+        "threshold_used":    round(THRESHOLD, 4),
         "top_shap_features": top_shap,
         "shap_interpretation": (
             "Positive SHAP = pushed toward fraud. "
@@ -115,17 +103,14 @@ def predict_single(transaction: Transaction):
 @app.get("/health")
 def health():
     return {
-        "status": "ok",
-        "model":  "fraud-detector-xgb-medium-balanced",
+        "status":    "ok",
+        "model":     "fraud-detector-xgb-medium-balanced",
         "threshold": round(THRESHOLD, 4)
     }
 
 @app.post("/predict")
 def predict(transaction: Transaction):
-    """
-    Single transaction fraud prediction with SHAP explainability.
-    Returns prediction, fraud probability, and top 5 SHAP features.
-    """
+    """Single transaction fraud prediction with SHAP explainability."""
     try:
         return predict_single(transaction)
     except Exception as e:
@@ -133,24 +118,18 @@ def predict(transaction: Transaction):
 
 @app.post("/predict/batch")
 def predict_batch(request: BatchRequest):
-    """
-    Batch prediction — up to 100 transactions at once.
-    Returns summary counts plus per-transaction predictions.
-    Real fraud systems process transactions in bulk, not one at a time.
-    """
+    """Batch prediction — up to 100 transactions at once."""
     try:
         results = []
         for i, txn in enumerate(request.transactions):
             result = predict_single(txn)
             results.append({
-                "transaction_id":   i,
-                "prediction":       result["prediction"],
-                "label":            result["label"],
+                "transaction_id":    i,
+                "prediction":        result["prediction"],
+                "label":             result["label"],
                 "fraud_probability": result["fraud_probability"],
             })
-
         flagged = [r for r in results if r["prediction"] == 1]
-
         return {
             "total_transactions": len(results),
             "flagged_count":      len(flagged),
@@ -160,7 +139,6 @@ def predict_batch(request: BatchRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-# ── SageMaker BYOC endpoints — identical to Project 1 ────────────
 @app.get("/ping")
 def ping():
     return {"status": "ok"}

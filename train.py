@@ -141,6 +141,10 @@ for v in variants:
     )
     model.fit(X_train_resampled, y_train_resampled)
 
+    # Save each variant individually for A/B testing
+    joblib.dump(model, f'fraud_model_{run_name}.joblib')
+    print(f"  Saved: fraud_model_{run_name}.joblib")
+
     # Evaluate at tuned threshold
     y_proba = model.predict_proba(X_test)[:, 1]
     y_pred  = (y_proba >= THRESHOLD).astype(int)
