@@ -34,6 +34,7 @@ fraud-detection-api/
 ├── eda.py                      # Exploratory data analysis + visualizations
 ├── train.py                    # Model training, threshold tuning, W&B logging
 ├── main.py                     # FastAPI REST API with /predict and SHAP explainability
+├── test_main.py                # Pytest test suite (6 tests)
 ├── fraud_model.joblib          # Saved best model (output of train.py)
 ├── threshold.joblib            # Saved optimal threshold (output of train.py)
 ├── class_imbalance.png         # Output chart: class distribution
@@ -213,6 +214,28 @@ Input: `{"transactions": [...]}` — up to 100 transaction objects.
   "results": [...]
 }
 ```
+
+### Run Tests
+
+```bash
+venv\Scripts\python.exe -m pytest test_main.py -v
+```
+
+The test suite covers 6 cases:
+
+| Test | What it checks |
+| --- | --- |
+| `test_health_returns_200` | `/health` returns 200 with `status`, `model`, and a valid threshold |
+| `test_predict_returns_valid_structure` | `/predict` returns all required fields including 5 SHAP values as plain floats |
+| `test_fraud_transaction_flagged` | Known fraud pattern (high negative V14) is correctly classified as fraud |
+| `test_batch_predict_returns_correct_structure` | `/predict/batch` returns correct counts and per-transaction results |
+| `test_missing_field_returns_422` | Missing a required field (e.g. `V14`) returns HTTP 422 |
+| `test_wrong_type_returns_422` | Wrong data type (e.g. `Amount: "text"`) returns HTTP 422 |
+
+Test fixtures used:
+
+- **`LEGIT_TRANSACTION`** — real transaction from row 0 of the dataset, expected label: `legitimate`
+- **`FRAUD_TRANSACTION`** — known fraud pattern with strongly negative `V14` (`-4.2895`), expected label: `fraud`
 
 ---
 
