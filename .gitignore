@@ -4,6 +4,4 @@ __pycache__/
 .env
 wandb/
 *.png
-fraud_model.joblib
-threshold.joblib
 data/
