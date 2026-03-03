@@ -19,13 +19,19 @@ from state import FEATURE_NAMES, explainer
 router = APIRouter(prefix="/shap", tags=["SHAP Plots"])
 
 # ── 200-row background sample — computed once at startup ───────────
-_background_df = (
-    pd.read_csv("data/creditcard.csv")
-      .drop(columns=["Class"])
-      .sample(n=200, random_state=42)
-      [FEATURE_NAMES]
-)
-_background_shap: shap.Explanation = explainer(_background_df)
+# Optional: only available when data/creditcard.csv is present (not in CI).
+_background_shap = None
+try:
+    _background_df = (
+        pd.read_csv("data/creditcard.csv")
+          .drop(columns=["Class"])
+          .sample(n=200, random_state=42)
+          [FEATURE_NAMES]
+    )
+    _background_shap = explainer(_background_df)
+    print("SHAP plots: background dataset loaded.")
+except FileNotFoundError:
+    print("SHAP plots: data/creditcard.csv not found — plot endpoints disabled.")
 
 
 def _fig_to_png(fig: plt.Figure) -> StreamingResponse:
@@ -43,6 +49,8 @@ def shap_beeswarm(max_display: int = Query(20, ge=5, le=30)):
     Each dot is one sample; color = feature value; x-axis = SHAP impact on fraud probability.
     Returns a PNG image.
     """
+    if _background_shap is None:
+        raise HTTPException(status_code=503, detail="SHAP plots require data/creditcard.csv at startup.")
     try:
         plt.figure(figsize=(10, 8))
         shap.plots.beeswarm(_background_shap, max_display=max_display, show=False)
@@ -59,6 +67,8 @@ def shap_bar(max_display: int = Query(20, ge=5, le=30)):
     Bar plot — mean absolute SHAP value per feature (global importance ranking).
     Returns a PNG image.
     """
+    if _background_shap is None:
+        raise HTTPException(status_code=503, detail="SHAP plots require data/creditcard.csv at startup.")
     try:
         plt.figure(figsize=(10, 6))
         shap.plots.bar(_background_shap, max_display=max_display, show=False)
